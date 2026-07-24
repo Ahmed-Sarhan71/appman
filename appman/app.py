@@ -11,7 +11,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
-from textual.widgets import DataTable, Footer, Input, Static
+from textual.widgets import DataTable, Footer, Input, Select, Static
 
 
 from rich.text import Text
@@ -85,10 +85,16 @@ class AppMan(App):
         self._sort_column = ""
         self._sort_reverse = False
         self._current_query = ""
+        self._selected_category = "All"
+
+    CATS = ("All", "Browser", "Editor", "Terminal", "Development", "IDE",
+            "Graphics", "Video", "Audio", "Game", "Office", "Communication",
+            "Security", "System", "Database", "Cloud", "Other")
 
     def compose(self) -> ComposeResult:
         with Vertical(id="main-col"):
             yield Input(placeholder="Search packages…", id="search")
+            yield Select([(c, c) for c in self.CATS], value="All", id="cat")
             yield DataTable(id="table")
         with Vertical(id="detail-col"):
             yield DetailPanel(id="detail")
@@ -147,13 +153,18 @@ class AppMan(App):
     def on_input_changed(self, event: Input.Changed) -> None:
         self._filter(event.value)
 
+    def on_select_changed(self, event: Select.Changed) -> None:
+        self._selected_category = event.value
+        self._filter(self._current_query)
+
     def _filter(self, query: str) -> None:
         self._current_query = query
         q = query.strip().lower()
         table = self.query_one("#table", DataTable)
         table.clear()
         for p in self._all_packages:
-            if q in p.name.lower() or q in p.description.lower() or q in p.category.lower():
+            if (self._selected_category in ("All", "") or p.category == self._selected_category) \
+               and (q in p.name.lower() or q in p.description.lower() or q in p.category.lower()):
                 table.add_row(
                     p.name, p.version, p.category,
                     _fmt_size(p.installed_size), _fmt_date(p.install_date), PKG_SOURCE,
