@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 from textual import work
@@ -12,6 +13,8 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.widgets import DataTable, Footer, Input, Static
 
+
+from rich.text import Text
 
 from . import backends
 PKG_SOURCE = "pacman"  # ponytail: flatpak support when needed
@@ -27,6 +30,10 @@ def _fmt_size(n: int) -> str:
     return f"{n / 1024**3:.2f} GiB"
 
 
+def _fmt_date(ts: int) -> str:
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else "—"
+
+
 class DetailPanel(Static):
     """Right-side detail pane for the selected package."""
 
@@ -40,6 +47,7 @@ class DetailPanel(Static):
             f"Source:   {PKG_SOURCE}",
             f"Category: {pkg.category}",
             f"Size:     {_fmt_size(pkg.installed_size)}",
+            f"Installed: {_fmt_date(pkg.install_date)}",
             f"Reason:   {'explicit' if pkg.install_reason == 0 else 'dependency'}",
         ]
         if pkg.url:
@@ -74,6 +82,7 @@ class AppMan(App):
         super().__init__()
         self._all_packages: list[backends.Package] = []
         self._selected_pkg: backends.Package | None = None
+        self._sort_column = ""
         self._sort_reverse = False
         self._current_query = ""
 
@@ -88,7 +97,7 @@ class AppMan(App):
     def on_mount(self) -> None:
         table = self.query_one("#table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("Name", "Version", "Category", "Disk Size", "Source")
+        table.add_columns("Name", "Version", "Category", "Disk Size", "Installed On", "Source")
         self.load_packages()
         self.query_one("#search", Input).focus()
 
@@ -104,12 +113,13 @@ class AppMan(App):
         for p in pkgs:
             table.add_row(
                 p.name, p.version, p.category,
-                _fmt_size(p.installed_size), PKG_SOURCE,
+                _fmt_size(p.installed_size), _fmt_date(p.install_date), PKG_SOURCE,
                 key=p.name,
             )
+        self._apply_sort_arrows_to_columns()
         self.query_one("#detail", DetailPanel).show(None)
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         key = event.row_key.value
         for p in self._all_packages:
             if p.name == key:
@@ -118,12 +128,21 @@ class AppMan(App):
                 return
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
-        if event.label.plain == "Disk Size":
+        label = event.label.plain.rstrip(" ↑↓")
+        if label not in ("Name", "Disk Size", "Installed On"):
+            return
+        if self._sort_column == label:
             self._sort_reverse = not self._sort_reverse
-            self._all_packages.sort(
-                key=lambda p: p.installed_size, reverse=self._sort_reverse,
-            )
-            self._filter(self._current_query)
+        else:
+            self._sort_column = label
+            self._sort_reverse = False
+        if label == "Disk Size":
+            self._all_packages.sort(key=lambda p: p.installed_size, reverse=self._sort_reverse)
+        elif label == "Name":
+            self._all_packages.sort(key=lambda p: p.name.lower(), reverse=self._sort_reverse)
+        else:
+            self._all_packages.sort(key=lambda p: p.install_date, reverse=self._sort_reverse)
+        self._filter(self._current_query)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._filter(event.value)
@@ -137,11 +156,27 @@ class AppMan(App):
             if q in p.name.lower() or q in p.description.lower() or q in p.category.lower():
                 table.add_row(
                     p.name, p.version, p.category,
-                    _fmt_size(p.installed_size), PKG_SOURCE,
+                    _fmt_size(p.installed_size), _fmt_date(p.install_date), PKG_SOURCE,
                     key=p.name,
                 )
+        self._apply_sort_arrows_to_columns()
+
+    def _apply_sort_arrows_to_columns(self) -> None:
+        """Set column header labels with current sort arrow."""
+        table = self.query_one("#table", DataTable)
+        for col in table.ordered_columns:
+            plain = col.label.plain.rstrip(" ↑↓")
+            arrow = ""
+            if plain == self._sort_column:
+                arrow = " ↑" if not self._sort_reverse else " ↓"
+            col.label = Text(f"{plain}{arrow}")
+            # column content_width frozen at add time; bump it so arrow doesn't clip
+            needed = len(plain) + (2 if arrow else 0)
+            if col.content_width < needed:
+                col.content_width = needed
 
     def action_refresh(self) -> None:
+        self._sort_column = ""
         self._sort_reverse = False
         pkgs = backends.refresh_cache()
         self._all_packages = backends.filtered_packages(pkgs)

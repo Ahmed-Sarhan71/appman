@@ -29,6 +29,7 @@ class Package:
     description: str
     url: str = ""
     installed_size: int = 0
+    install_date: int = 0
     install_reason: int = 0  # 0=explicit, 1=dependency
     license_: str = ""
     category: str = "Other"
@@ -65,6 +66,7 @@ def _parse_pkg_dir(pkg_dir: Path) -> Package | None:
         description=desc.get("desc", ""),
         url=desc.get("url", ""),
         installed_size=int(desc.get("size", 0)),
+        install_date=int(desc.get("installdate", 0)),
         install_reason=int(desc.get("reason", 0)),
         license_=desc.get("license", ""),
     )
