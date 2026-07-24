@@ -157,16 +157,70 @@ def _flatpak_packages() -> list[Package]:
     return pkgs
 
 
+# ── snap ──────────────────────────────────────────────────────────────────
+
+def _snap_packages() -> list[Package]:
+    """Parse `snap list` output."""
+    try:
+        r = subprocess.run(["snap", "list"], capture_output=True, text=True, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    pkgs: list[Package] = []
+    for line in r.stdout.strip().splitlines()[1:]:
+        parts = line.split()
+        if not parts:
+            continue
+        pkgs.append(Package(name=parts[0], version=parts[1] if len(parts) > 1 else "", description="", source="snap"))
+    return pkgs
+
+
+# ── AppImage ──────────────────────────────────────────────────────────────
+
+APPIMAGE_DIRS = [Path.home() / "Applications", Path.home() / "AppImages", Path("/opt")]
+
+def _appimage_packages() -> list[Package]:
+    """Scan APPIMAGE_DIRS for .AppImage files."""
+    pkgs: list[Package] = []
+    for d in APPIMAGE_DIRS:
+        if not d.is_dir():
+            continue
+        for f in d.iterdir():
+            if f.suffix == ".AppImage" or f.name.lower().endswith(".appimage"):
+                pkgs.append(Package(name=f.stem, version="", description="", installed_size=f.stat().st_size, source="appimage"))
+    return pkgs
+
+
+# ── AUR detection ─────────────────────────────────────────────────────────
+
+_AUR_NAMES: set[str] | None = None  # cached after first call
+
+def _aur_package_names() -> set[str]:
+    """Return set of package names installed from AUR (not in any repo)."""
+    global _AUR_NAMES
+    if _AUR_NAMES is not None:
+        return _AUR_NAMES
+    try:
+        r = subprocess.run(["pacman", "-Qqm"], capture_output=True, text=True, timeout=10)
+        _AUR_NAMES = {line.strip() for line in r.stdout.strip().splitlines() if line.strip()}
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        _AUR_NAMES = set()
+    return _AUR_NAMES
+
+
 # ── combined loader ──────────────────────────────────────────────────────
 
 def get_packages(force_refresh: bool = False) -> list[Package]:
     """Return all packages from all sources, cached."""
+    aur_names = _aur_package_names()
     if not force_refresh and CACHE_FILE.exists():
         data = json.loads(CACHE_FILE.read_text())
         pkgs = [Package(**p) for p in data]
         for p in pkgs:
             if not p.category or p.category == "Other":
                 p.category = _detect_category(p)
+            # fix up stale source labels from old cache
+            if p.source == "pacman" and p.name in aur_names:
+                p.source = "aur"
         return pkgs
 
     pkgs: list[Package] = []
@@ -175,9 +229,14 @@ def get_packages(force_refresh: bool = False) -> list[Package]:
         pkg = _parse_pkg_dir(entry)
         if pkg is not None:
             pkg.category = _detect_category(pkg)
+            pkg.source = "aur" if pkg.name in aur_names else "pacman"
             pkgs.append(pkg)
     # flatpak
     pkgs.extend(_flatpak_packages())
+    # snap
+    pkgs.extend(_snap_packages())
+    # appimage
+    pkgs.extend(_appimage_packages())
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     _write_cache(pkgs)
