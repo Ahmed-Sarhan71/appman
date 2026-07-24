@@ -9,13 +9,11 @@ from pathlib import Path
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
-from textual.reactive import reactive
+from textual.containers import Vertical
 from textual.widgets import DataTable, Footer, Input, Static
-from textual.widgets.data_table import Column, Row
+
 
 from . import backends
-
 PKG_SOURCE = "pacman"  # ponytail: flatpak support when needed
 
 
@@ -90,10 +88,7 @@ class AppMan(App):
     def on_mount(self) -> None:
         table = self.query_one("#table", DataTable)
         table.cursor_type = "row"
-        table.add_columns(
-            "Name", "Version", "Category",
-            Column("Disk Size", key="size"), "Source",
-        )
+        table.add_columns("Name", "Version", "Category", "Disk Size", "Source")
         self.load_packages()
         self.query_one("#search", Input).focus()
 
@@ -123,7 +118,7 @@ class AppMan(App):
                 return
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
-        if event.column_key == "size":
+        if event.label.plain == "Disk Size":
             self._sort_reverse = not self._sort_reverse
             self._all_packages.sort(
                 key=lambda p: p.installed_size, reverse=self._sort_reverse,
