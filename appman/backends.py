@@ -59,20 +59,13 @@ def _parse_pkg_dir(pkg_dir: Path) -> Package | None:
     if not desc_file.exists():
         return None
     desc = _parse_sections(desc_file.read_text())
-    install_file = pkg_dir / "install"
-    reason = 0
-    if install_file.exists():
-        for line in install_file.read_text().splitlines():
-            if line.strip().isdigit():
-                reason = int(line.strip())
-                break
     return Package(
         name=desc.get("name", pkg_dir.name),
         version=desc.get("version", ""),
         description=desc.get("desc", ""),
         url=desc.get("url", ""),
         installed_size=int(desc.get("size", 0)),
-        install_reason=reason,
+        install_reason=int(desc.get("reason", 0)),
         license_=desc.get("license", ""),
     )
 
