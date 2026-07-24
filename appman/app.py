@@ -76,6 +76,8 @@ class AppMan(App):
         super().__init__()
         self._all_packages: list[backends.Package] = []
         self._selected_pkg: backends.Package | None = None
+        self._sort_reverse = False
+        self._current_query = ""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="main-col"):
@@ -88,7 +90,10 @@ class AppMan(App):
     def on_mount(self) -> None:
         table = self.query_one("#table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("Name", "Version", "Category", "Disk Size", "Source")
+        table.add_columns(
+            "Name", "Version", "Category",
+            Column("Disk Size", key="size"), "Source",
+        )
         self.load_packages()
         self.query_one("#search", Input).focus()
 
@@ -117,10 +122,19 @@ class AppMan(App):
                 self.query_one("#detail", DetailPanel).show(p)
                 return
 
+    def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
+        if event.column_key == "size":
+            self._sort_reverse = not self._sort_reverse
+            self._all_packages.sort(
+                key=lambda p: p.installed_size, reverse=self._sort_reverse,
+            )
+            self._filter(self._current_query)
+
     def on_input_changed(self, event: Input.Changed) -> None:
         self._filter(event.value)
 
     def _filter(self, query: str) -> None:
+        self._current_query = query
         q = query.strip().lower()
         table = self.query_one("#table", DataTable)
         table.clear()
@@ -133,6 +147,7 @@ class AppMan(App):
                 )
 
     def action_refresh(self) -> None:
+        self._sort_reverse = False
         pkgs = backends.refresh_cache()
         self._all_packages = backends.filtered_packages(pkgs)
         self._populate_table(self._all_packages)
