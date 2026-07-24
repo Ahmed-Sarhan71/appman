@@ -17,7 +17,6 @@ from textual.widgets import DataTable, Footer, Input, Select, Static
 from rich.text import Text
 
 from . import backends
-PKG_SOURCE = "pacman"  # ponytail: flatpak support when needed
 
 
 def _fmt_size(n: int) -> str:
@@ -44,7 +43,7 @@ class DetailPanel(Static):
         lines = [
             f"[bold]{pkg.name}[/bold]",
             f"Version:  {pkg.version}",
-            f"Source:   {PKG_SOURCE}",
+            f"Source:   {pkg.source}",
             f"Category: {pkg.category}",
             f"Size:     {_fmt_size(pkg.installed_size)}",
             f"Installed: {_fmt_date(pkg.install_date)}",
@@ -119,8 +118,8 @@ class AppMan(App):
         for p in pkgs:
             table.add_row(
                 p.name, p.version, p.category,
-                _fmt_size(p.installed_size), _fmt_date(p.install_date), PKG_SOURCE,
-                key=p.name,
+                _fmt_size(p.installed_size), _fmt_date(p.install_date), p.source,
+                key=f"{p.name}-{p.source}" if p.source != "pacman" else p.name,
             )
         self._apply_sort_arrows_to_columns()
         self.query_one("#detail", DetailPanel).show(None)
@@ -128,7 +127,8 @@ class AppMan(App):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         key = event.row_key.value
         for p in self._all_packages:
-            if p.name == key:
+            match_key = f"{p.name}-{p.source}" if p.source != "pacman" else p.name
+            if match_key == key:
                 self._selected_pkg = p
                 self.query_one("#detail", DetailPanel).show(p)
                 return
@@ -167,8 +167,8 @@ class AppMan(App):
                and (q in p.name.lower() or q in p.description.lower() or q in p.category.lower()):
                 table.add_row(
                     p.name, p.version, p.category,
-                    _fmt_size(p.installed_size), _fmt_date(p.install_date), PKG_SOURCE,
-                    key=p.name,
+                    _fmt_size(p.installed_size), _fmt_date(p.install_date), p.source,
+                    key=f"{p.name}-{p.source}" if p.source != "pacman" else p.name,
                 )
         self._apply_sort_arrows_to_columns()
 

@@ -33,6 +33,7 @@ class Package:
     install_reason: int = 0  # 0=explicit, 1=dependency
     license_: str = ""
     category: str = "Other"
+    source: str = "pacman"
 
 
 # ── parsers ──────────────────────────────────────────────────────────────
@@ -115,27 +116,77 @@ def _detect_category(pkg: Package) -> str:
 
 # ── public API ────────────────────────────────────────────────────────────
 
+# ── flatpak ──────────────────────────────────────────────────────────────
+
+def _flatpak_packages() -> list[Package]:
+    """Parse `flatpak list` output, return as Packages with source=flatpak."""
+    try:
+        r = subprocess.run(
+            ["flatpak", "list", "--columns=application,version,size,installation"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    pkgs: list[Package] = []
+    for line in r.stdout.strip().splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        app_id = parts[0]
+        version = parts[1] if len(parts) > 1 else ""
+        size_str = parts[2] if len(parts) > 2 else ""
+        install = parts[3] if len(parts) > 3 else "system"
+        size_bytes = 0
+        if size_str:
+            try:
+                # flatpak can output "1.4 MB", "502.9 MB", etc.
+                num, unit = size_str.split()
+                num = float(num)
+                size_bytes = int(num * {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}.get(unit, 1))
+            except (ValueError, IndexError):
+                pass
+        # source label: "flatpak:system" vs "flatpak:user"
+        source_label = f"flatpak:{install}"
+        pkgs.append(Package(
+            name=app_id,
+            version=version,
+            description="",
+            installed_size=size_bytes,
+            install_date=0,
+            source=source_label,
+        ))
+    return pkgs
+
+
+# ── combined loader ──────────────────────────────────────────────────────
+
 def get_packages(force_refresh: bool = False) -> list[Package]:
-    """Return all installed packages from pacman, cached."""
+    """Return all packages from all sources, cached."""
     if not force_refresh and CACHE_FILE.exists():
         data = json.loads(CACHE_FILE.read_text())
         pkgs = [Package(**p) for p in data]
-        # backfill category for old caches
         for p in pkgs:
             if not p.category or p.category == "Other":
                 p.category = _detect_category(p)
         return pkgs
 
     pkgs: list[Package] = []
+    # pacman
     for entry in sorted(PACMAN_DB.iterdir()):
         pkg = _parse_pkg_dir(entry)
         if pkg is not None:
             pkg.category = _detect_category(pkg)
             pkgs.append(pkg)
+    # flatpak
+    pkgs.extend(_flatpak_packages())
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     _write_cache(pkgs)
     return pkgs
+
+
+# ponytail: snap & AppImage added when user has them
+# ponytail: flatpak size parsing naive (assumes "X.Y UNIT"), misses edge cases
 
 
 def _write_cache(pkgs: list[Package]) -> None:
