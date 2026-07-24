@@ -85,6 +85,7 @@ class AppMan(App):
         self._sort_reverse = False
         self._current_query = ""
         self._selected_category = "All"
+        self._selected_source = ""
 
     CATS = ("All", "Browser", "Editor", "Terminal", "Development", "IDE",
             "Graphics", "Video", "Audio", "Game", "Office", "Communication",
@@ -93,6 +94,7 @@ class AppMan(App):
     def compose(self) -> ComposeResult:
         with Vertical(id="main-col"):
             yield Input(placeholder="Search packages…", id="search")
+            yield Select([], id="source_select")
             yield Select([(c, c) for c in self.CATS], value="All", id="cat")
             yield DataTable(id="table")
         with Vertical(id="detail-col"):
@@ -103,6 +105,7 @@ class AppMan(App):
         table = self.query_one("#table", DataTable)
         table.cursor_type = "row"
         table.add_columns("Name", "Version", "Category", "Disk Size", "Installed On", "Source")
+        # populate source select from loaded data
         self.load_packages()
         self.query_one("#search", Input).focus()
 
@@ -122,6 +125,7 @@ class AppMan(App):
                 key=f"{p.name}-{p.source}" if p.source != "pacman" else p.name,
             )
         self._apply_sort_arrows_to_columns()
+        self._populate_source_select()
         self.query_one("#detail", DetailPanel).show(None)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -153,9 +157,21 @@ class AppMan(App):
     def on_input_changed(self, event: Input.Changed) -> None:
         self._filter(event.value)
 
-    def on_select_changed(self, event: Select.Changed) -> None:
+    def on_select_changed(self, event: Select.Changed) -> None:  # category select
         self._selected_category = event.value
         self._filter(self._current_query)
+
+    def on_select_changed_source(self, event: Select.Changed) -> None:
+        self._selected_source = "" if event.value == "All sources" else event.value
+        self._filter(self._current_query)
+
+    def _populate_source_select(self) -> None:
+        sources = sorted({p.source for p in self._all_packages})
+        sel = self.query_one("#source_select", Select)
+        opts = [("All sources", "All sources")] + [(s, s) for s in sources]
+        current = sel.value
+        sel.set_options(opts)
+        sel.value = current if current in dict(opts) else "All sources"
 
     def _filter(self, query: str) -> None:
         self._current_query = query
@@ -163,6 +179,8 @@ class AppMan(App):
         table = self.query_one("#table", DataTable)
         table.clear()
         for p in self._all_packages:
+            if self._selected_source and p.source != self._selected_source:
+                continue
             if (self._selected_category in ("All", "") or p.category == self._selected_category) \
                and (q in p.name.lower() or q in p.description.lower() or q in p.category.lower()):
                 table.add_row(

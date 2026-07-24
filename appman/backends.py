@@ -128,6 +128,7 @@ def _flatpak_packages() -> list[Package]:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return []
     pkgs: list[Package] = []
+    seen: set[str] = set()
     for line in r.stdout.strip().splitlines():
         parts = line.split("\t")
         if len(parts) < 2:
@@ -139,21 +140,19 @@ def _flatpak_packages() -> list[Package]:
         size_bytes = 0
         if size_str:
             try:
-                # flatpak can output "1.4 MB", "502.9 MB", etc.
                 num, unit = size_str.split()
                 num = float(num)
                 size_bytes = int(num * {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}.get(unit, 1))
             except (ValueError, IndexError):
                 pass
-        # source label: "flatpak:system" vs "flatpak:user"
         source_label = f"flatpak:{install}"
+        dedup_key = f"{app_id}|{version}|{source_label}"
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
         pkgs.append(Package(
-            name=app_id,
-            version=version,
-            description="",
-            installed_size=size_bytes,
-            install_date=0,
-            source=source_label,
+            name=app_id, version=version, description="",
+            installed_size=size_bytes, install_date=0, source=source_label,
         ))
     return pkgs
 
@@ -200,11 +199,14 @@ def refresh_cache() -> list[Package]:
     return pkgs
 
 
-def filtered_packages(pkgs: list[Package] | None = None) -> list[Package]:
-    """Return only user-installed applications (hide libs, fonts, etc.)."""
+def filtered_packages(pkgs: list[Package] | None = None, source: str | None = None) -> list[Package]:
+    """Return user-installed apps, optionally filtered by source (None=all)."""
     if pkgs is None:
         pkgs = get_packages()
-    return [p for p in pkgs if _is_user_pkg(p)]
+    result = [p for p in pkgs if _is_user_pkg(p)]
+    if source:
+        result = [p for p in result if p.source == source]
+    return result
 
 
 # ponytail: no config file yet — add when user wants custom filter rules
